@@ -1,5 +1,6 @@
 #include "MainWindow.h"
 #include <QMessageBox>
+#include <QFontDatabase>
 #include <gst/video/videooverlay.h>
 
 // ============================================================
@@ -10,14 +11,6 @@ VideoWidget::VideoWidget(const QString& peerId, QWidget* parent)
     : QFrame(parent), m_peerId(peerId)
 {
     setObjectName("videoCard");
-    setFixedSize(320, 260);
-    setStyleSheet(R"(
-        #videoCard {
-            background: #1a1a2e;
-            border: 1px solid #2a2a4a;
-            border-radius: 12px;
-        }
-    )");
 
     QVBoxLayout* layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
@@ -25,31 +18,21 @@ VideoWidget::VideoWidget(const QString& peerId, QWidget* parent)
 
     // 视频渲染区域
     m_videoArea = new QWidget(this);
-    m_videoArea->setStyleSheet("background: #0d0d1a; border-radius: 12px;");
+    m_videoArea->setObjectName("videoArea");
     m_videoArea->setMinimumSize(320, 220);
     layout->addWidget(m_videoArea);
 
     // 底部标签
-    m_label = new QLabel(peerId.isEmpty() ? "Local Camera" : ("Peer: " + peerId.left(8)), this);
+    m_label = new QLabel(peerId, this);
+    m_label->setObjectName("videoLabel");
     m_label->setAlignment(Qt::AlignCenter);
-    m_label->setStyleSheet(R"(
-        color: #8888aa;
-        font-size: 12px;
-        padding: 6px;
-        background: transparent;
-    )");
     layout->addWidget(m_label);
 }
 
 void VideoWidget::setSink(GstElement* sink) {
-    // 将 GStreamer sink 嵌入 Qt 窗口
     if (!sink) return;
-
-    // 使用 XOverlay 将视频渲染到 Qt 窗口
-    // 注意: 需要窗口先 show 出来才能获取 winId
     m_videoArea->show();
     WId winId = m_videoArea->winId();
-
     if (GST_IS_VIDEO_OVERLAY(sink)) {
         gst_video_overlay_set_window_handle(GST_VIDEO_OVERLAY(sink), winId);
     }
@@ -66,7 +49,6 @@ MainWindow::MainWindow(QWidget* parent)
     setupUi();
     applyStyle();
 
-    // 信号连接
     connect(m_connectButton, &QPushButton::clicked, this, &MainWindow::onConnectClicked);
     connect(m_createRoomButton, &QPushButton::clicked, this, &MainWindow::onCreateRoomClicked);
     connect(m_joinRoomButton, &QPushButton::clicked, this, &MainWindow::onJoinRoomClicked);
@@ -82,8 +64,8 @@ MainWindow::MainWindow(QWidget* parent)
     connect(m_manager, &WebRTCManager::remoteVideoReady, this, &MainWindow::onRemoteVideoReady);
     connect(m_manager, &WebRTCManager::error, this, &MainWindow::onError);
 
-    setWindowTitle("WebRTC Video Conference");
-    resize(1100, 720);
+    setWindowTitle("WebRTC Conference");
+    resize(1200, 750);
 }
 
 MainWindow::~MainWindow() {}
@@ -103,16 +85,15 @@ void MainWindow::setupUi() {
     // ---- 顶部导航栏 ----
     m_topBar = new QFrame(m_centralWidget);
     m_topBar->setObjectName("topBar");
-    m_topBar->setFixedHeight(56);
+    m_topBar->setFixedHeight(52);
     QHBoxLayout* topLayout = new QHBoxLayout(m_topBar);
-    topLayout->setContentsMargins(24, 0, 24, 0);
+    topLayout->setContentsMargins(28, 0, 28, 0);
 
-    m_titleLabel = new QLabel("⬡  WebRTC Conference", m_topBar);
+    m_titleLabel = new QLabel("WebRTC Conference", m_topBar);
     m_titleLabel->setObjectName("titleLabel");
 
     m_statusDot = new QLabel("●", m_topBar);
     m_statusDot->setObjectName("statusDot");
-    m_statusDot->setStyleSheet("color: #555; font-size: 10px;");
 
     m_statusLabel = new QLabel("Disconnected", m_topBar);
     m_statusLabel->setObjectName("statusLabel");
@@ -120,6 +101,7 @@ void MainWindow::setupUi() {
     topLayout->addWidget(m_titleLabel);
     topLayout->addStretch();
     topLayout->addWidget(m_statusDot);
+    topLayout->addSpacing(6);
     topLayout->addWidget(m_statusLabel);
 
     m_mainLayout->addWidget(m_topBar);
@@ -132,12 +114,12 @@ void MainWindow::setupUi() {
     // 左侧控制面板
     QFrame* sidePanel = new QFrame(m_centralWidget);
     sidePanel->setObjectName("sidePanel");
-    sidePanel->setFixedWidth(280);
+    sidePanel->setFixedWidth(260);
     QVBoxLayout* sideLayout = new QVBoxLayout(sidePanel);
-    sideLayout->setContentsMargins(20, 24, 20, 24);
-    sideLayout->setSpacing(16);
+    sideLayout->setContentsMargins(24, 28, 24, 28);
+    sideLayout->setSpacing(20);
 
-    // 连接区域
+    // -- 连接区域 --
     QLabel* connTitle = new QLabel("CONNECTION", sidePanel);
     connTitle->setObjectName("sectionTitle");
 
@@ -149,16 +131,17 @@ void MainWindow::setupUi() {
     m_connectButton->setObjectName("primaryBtn");
 
     sideLayout->addWidget(connTitle);
+    sideLayout->addSpacing(8);
     sideLayout->addWidget(m_serverUrlInput);
     sideLayout->addWidget(m_connectButton);
 
     // 分隔线
     QFrame* sep = new QFrame(sidePanel);
+    sep->setObjectName("separator");
     sep->setFrameShape(QFrame::HLine);
-    sep->setStyleSheet("color: #2a2a4a;");
     sideLayout->addWidget(sep);
 
-    // 房间区域
+    // -- 房间区域 --
     QLabel* roomTitle = new QLabel("ROOM", sidePanel);
     roomTitle->setObjectName("sectionTitle");
 
@@ -168,7 +151,7 @@ void MainWindow::setupUi() {
     m_roomIdInput->setEnabled(false);
 
     QHBoxLayout* roomBtnLayout = new QHBoxLayout();
-    roomBtnLayout->setSpacing(8);
+    roomBtnLayout->setSpacing(10);
     m_createRoomButton = new QPushButton("Create", sidePanel);
     m_createRoomButton->setObjectName("accentBtn");
     m_createRoomButton->setEnabled(false);
@@ -186,20 +169,22 @@ void MainWindow::setupUi() {
     m_roomLabel->setObjectName("roomInfo");
 
     sideLayout->addWidget(roomTitle);
+    sideLayout->addSpacing(8);
     sideLayout->addWidget(m_roomIdInput);
     sideLayout->addLayout(roomBtnLayout);
     sideLayout->addWidget(m_leaveRoomButton);
+    sideLayout->addSpacing(4);
     sideLayout->addWidget(m_roomLabel);
     sideLayout->addStretch();
 
-    // 右侧视频网格
+    // 右侧视频区域
     m_videoPanel = new QFrame(m_centralWidget);
     m_videoPanel->setObjectName("videoPanel");
     QVBoxLayout* videoOuterLayout = new QVBoxLayout(m_videoPanel);
-    videoOuterLayout->setContentsMargins(24, 24, 24, 24);
+    videoOuterLayout->setContentsMargins(28, 28, 28, 28);
 
     m_videoGrid = new QGridLayout();
-    m_videoGrid->setSpacing(16);
+    m_videoGrid->setSpacing(20);
     videoOuterLayout->addLayout(m_videoGrid);
 
     bodyLayout->addWidget(sidePanel);
@@ -208,142 +193,226 @@ void MainWindow::setupUi() {
     m_mainLayout->addLayout(bodyLayout, 1);
 }
 
+// ============================================================
+// 样式表 - Claude 黑橙风格
+// ============================================================
+
 void MainWindow::applyStyle() {
-    setStyleSheet(R"(
-        QMainWindow {
-            background: #0d0d1a;
+    // 尝试加载 Inter 字体，回退到系统默认
+    int fontId = QFontDatabase::addApplicationFont(":/fonts/Inter-Regular.ttf");
+    QString fontFamily = "Inter";
+    if (fontId == -1) {
+        // Inter 不可用，使用系统 sans-serif
+        fontFamily = "Cantarell, Helvetica Neue, Arial, sans-serif";
+    }
+
+    setStyleSheet(QStringLiteral(R"(
+        /* ========== 全局 ========== */
+        * {
+            font-family: '%1', 'Helvetica Neue', Arial, sans-serif;
         }
 
+        QMainWindow, QWidget#centralWidget {
+            background: #0a0a0a;
+        }
+
+        /* ========== 顶部栏 ========== */
         #topBar {
-            background: #111128;
-            border-bottom: 1px solid #1e1e3a;
+            background: #0a0a0a;
+            border-bottom: 1px solid #1e1e1e;
         }
 
         #titleLabel {
-            color: #e0e0ff;
-            font-size: 18px;
-            font-weight: bold;
-            letter-spacing: 1px;
+            color: #e8e8e8;
+            font-size: 15px;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+        }
+
+        #statusDot {
+            color: #3a3a3a;
+            font-size: 8px;
         }
 
         #statusLabel {
-            color: #6666aa;
+            color: #6b6b6b;
             font-size: 13px;
+            font-weight: 400;
         }
 
+        /* ========== 侧边栏 ========== */
         #sidePanel {
-            background: #111128;
-            border-right: 1px solid #1e1e3a;
+            background: #0f0f0f;
+            border-right: 1px solid #1e1e1e;
         }
 
         #sectionTitle {
-            color: #5555aa;
-            font-size: 11px;
-            font-weight: bold;
-            letter-spacing: 2px;
+            color: #d97757;
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: 2.5px;
         }
 
+        #separator {
+            background: #1e1e1e;
+            max-height: 1px;
+        }
+
+        /* ========== 输入框 ========== */
         #inputField {
-            background: #1a1a2e;
-            border: 1px solid #2a2a4a;
-            border-radius: 8px;
-            padding: 10px 14px;
-            color: #c0c0e0;
+            background: #1a1a1a;
+            border: 1px solid #2a2a2a;
+            border-radius: 10px;
+            padding: 11px 14px;
+            color: #e0e0e0;
             font-size: 13px;
-            selection-background-color: #4444aa;
+            selection-background-color: #d97757;
         }
 
         #inputField:focus {
-            border-color: #5555cc;
+            border-color: #d97757;
+            background: #141414;
         }
 
         #inputField:disabled {
-            background: #131325;
-            color: #444466;
+            background: #111111;
+            color: #3a3a3a;
+            border-color: #1a1a1a;
         }
 
+        #inputField::placeholder {
+            color: #4a4a4a;
+        }
+
+        /* ========== 主按钮 (橙色实心) ========== */
         #primaryBtn {
-            background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                stop:0 #4444cc, stop:1 #6666ee);
-            color: white;
+            background: #d97757;
+            color: #ffffff;
             border: none;
-            border-radius: 8px;
-            padding: 10px;
+            border-radius: 10px;
+            padding: 11px 16px;
             font-size: 13px;
-            font-weight: bold;
+            font-weight: 600;
         }
 
         #primaryBtn:hover {
-            background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                stop:0 #5555dd, stop:1 #7777ff);
+            background: #e08a6a;
+        }
+
+        #primaryBtn:pressed {
+            background: #c46a4a;
         }
 
         #primaryBtn:disabled {
-            background: #222244;
-            color: #444466;
+            background: #2a2a2a;
+            color: #4a4a4a;
         }
 
+        /* ========== 次级按钮 (描边) ========== */
         #accentBtn {
-            background: #1e1e3a;
-            color: #8888cc;
-            border: 1px solid #2a2a5a;
-            border-radius: 8px;
-            padding: 10px;
+            background: transparent;
+            color: #d97757;
+            border: 1px solid #3a2a22;
+            border-radius: 10px;
+            padding: 11px 16px;
             font-size: 13px;
-            font-weight: bold;
+            font-weight: 600;
         }
 
         #accentBtn:hover {
-            background: #2a2a4a;
-            color: #aaaaff;
-            border-color: #4444aa;
+            background: #1a1410;
+            border-color: #d97757;
+        }
+
+        #accentBtn:pressed {
+            background: #241a14;
         }
 
         #accentBtn:disabled {
-            background: #151530;
-            color: #333355;
-            border-color: #1e1e3a;
+            background: transparent;
+            color: #2a2a2a;
+            border-color: #1e1e1e;
         }
 
+        /* ========== 危险按钮 ========== */
         #dangerBtn {
-            background: #2a1520;
-            color: #cc4466;
-            border: 1px solid #442233;
-            border-radius: 8px;
-            padding: 10px;
+            background: transparent;
+            color: #6b4a4a;
+            border: 1px solid #2a1a1a;
+            border-radius: 10px;
+            padding: 11px 16px;
             font-size: 13px;
+            font-weight: 500;
         }
 
         #dangerBtn:hover {
-            background: #3a2030;
-            color: #ff5577;
+            background: #1a0f0f;
+            color: #c45050;
+            border-color: #4a2020;
         }
 
         #dangerBtn:disabled {
-            background: #1a1018;
-            color: #443344;
+            background: transparent;
+            color: #222222;
+            border-color: #161616;
         }
 
+        /* ========== 房间信息 ========== */
         #roomInfo {
-            color: #5555aa;
+            color: #d97757;
             font-size: 13px;
-            padding: 8px 0;
+            font-weight: 500;
+            padding: 4px 0;
         }
 
+        /* ========== 视频区域 ========== */
         #videoPanel {
-            background: #0d0d1a;
+            background: #0a0a0a;
         }
 
+        #videoCard {
+            background: #141414;
+            border: 1px solid #1e1e1e;
+            border-radius: 14px;
+        }
+
+        #videoCard:hover {
+            border-color: #2a2a2a;
+        }
+
+        #videoArea {
+            background: #0d0d0d;
+            border-radius: 14px 14px 0 0;
+        }
+
+        #videoLabel {
+            color: #6b6b6b;
+            font-size: 11px;
+            font-weight: 500;
+            padding: 10px 12px;
+            background: transparent;
+            border-radius: 0 0 14px 14px;
+        }
+
+        /* ========== 滚动条 ========== */
         QScrollBar:vertical {
-            background: #0d0d1a;
-            width: 8px;
+            background: #0a0a0a;
+            width: 6px;
         }
 
         QScrollBar::handle:vertical {
-            background: #2a2a4a;
-            border-radius: 4px;
+            background: #2a2a2a;
+            border-radius: 3px;
         }
-    )");
+
+        QScrollBar::add-line:vertical,
+        QScrollBar::sub-line:vertical {
+            height: 0;
+        }
+    )").arg(fontFamily));
+
+    // 更新状态指示灯颜色
+    m_statusDot->setStyleSheet("color: #3a3a3a; font-size: 8px;");
 }
 
 // ============================================================
@@ -356,7 +425,7 @@ void MainWindow::onConnectClicked() {
     m_manager->connectToServer(url);
     m_connectButton->setEnabled(false);
     m_statusLabel->setText("Connecting...");
-    m_statusDot->setStyleSheet("color: #ccaa00; font-size: 10px;");
+    m_statusDot->setStyleSheet("color: #d97757; font-size: 8px;");
 }
 
 void MainWindow::onCreateRoomClicked() {
@@ -374,7 +443,6 @@ void MainWindow::onJoinRoomClicked() {
 
 void MainWindow::onLeaveRoomClicked() {
     m_manager->leaveRoom();
-    // 清除所有视频卡片
     for (auto* w : m_videoWidgets) {
         m_videoGrid->removeWidget(w);
         w->deleteLater();
@@ -386,7 +454,7 @@ void MainWindow::onLeaveRoomClicked() {
     m_roomIdInput->setEnabled(true);
     m_roomLabel->setText("Not in room");
     m_statusLabel->setText("Connected");
-    m_statusDot->setStyleSheet("color: #44cc66; font-size: 10px;");
+    m_statusDot->setStyleSheet("color: #d97757; font-size: 8px;");
 }
 
 void MainWindow::onConnected() {
@@ -395,7 +463,7 @@ void MainWindow::onConnected() {
     m_joinRoomButton->setEnabled(true);
     m_roomIdInput->setEnabled(true);
     m_statusLabel->setText("Connected");
-    m_statusDot->setStyleSheet("color: #44cc66; font-size: 10px;");
+    m_statusDot->setStyleSheet("color: #d97757; font-size: 8px;");
 }
 
 void MainWindow::onDisconnected() {
@@ -405,7 +473,7 @@ void MainWindow::onDisconnected() {
     m_leaveRoomButton->setEnabled(false);
     m_roomIdInput->setEnabled(false);
     m_statusLabel->setText("Disconnected");
-    m_statusDot->setStyleSheet("color: #555; font-size: 10px;");
+    m_statusDot->setStyleSheet("color: #3a3a3a; font-size: 8px;");
     m_roomLabel->setText("Not in room");
 }
 
@@ -428,12 +496,12 @@ void MainWindow::onRoomJoined(const QString& roomId) {
 }
 
 void MainWindow::onPeerJoined(const QString& peerId) {
-    m_statusLabel->setText("Peer joined: " + peerId.left(8));
+    m_statusLabel->setText("Peer joined");
 }
 
 void MainWindow::onPeerLeft(const QString& peerId) {
     removeVideoWidget(peerId);
-    m_statusLabel->setText("Peer left: " + peerId.left(8));
+    m_statusLabel->setText("Peer left");
 }
 
 void MainWindow::onLocalVideoReady(void* sink) {
@@ -463,7 +531,7 @@ void MainWindow::onError(const QString& message) {
 void MainWindow::addVideoWidget(const QString& peerId, bool isLocal) {
     if (m_videoWidgets.contains(peerId)) return;
 
-    QString label = isLocal ? "Local Camera" : ("Peer: " + peerId.left(8));
+    QString label = isLocal ? "Local Camera" : ("Remote · " + peerId);
     VideoWidget* w = new VideoWidget(label, m_videoPanel);
     m_videoWidgets[peerId] = w;
     updateGridLayout();
@@ -480,16 +548,14 @@ void MainWindow::removeVideoWidget(const QString& peerId) {
 }
 
 void MainWindow::updateGridLayout() {
-    // 清除现有布局
     while (m_videoGrid->count() > 0) {
-        QLayoutItem* item = m_videoGrid->takeAt(0);
-        // 不 delete widget，只是从布局移除
+        m_videoGrid->takeAt(0);
     }
 
-    // 重新排列: 本地视频固定在左上角
     int col = 0, row = 0;
-    int maxCols = 2; // 每行最多2个，可扩展
+    int maxCols = 2;
 
+    // 本地视频固定左上
     if (m_videoWidgets.contains("")) {
         m_videoGrid->addWidget(m_videoWidgets[""], row, col);
         col++;
