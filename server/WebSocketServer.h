@@ -36,9 +36,12 @@ private:
 
     void send_json(connection_hdl hdl, const json& msg);
     void broadcast_to_room(const std::string& room_id, const json& msg, connection_hdl exclude = {});
+    std::string generate_peer_id();
 
     server m_server;
     std::map<std::string, Room> m_rooms;
-    std::map<connection_hdl, std::string, std::owner_less<connection_hdl>> m_peer_rooms;
+    std::map<connection_hdl, std::string, std::owner_less<connection_hdl>> m_peer_rooms;     // hdl → room_id
+    std::map<connection_hdl, std::string, std::owner_less<connection_hdl>> m_peer_ids;        // hdl → peer_id
     std::mutex m_mutex;
+    int m_peer_counter = 0;
 };

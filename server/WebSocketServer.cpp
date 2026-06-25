@@ -16,13 +16,21 @@ void WebSocketServer::run(uint16_t port) {
     m_server.run();
 }
 
+std::string WebSocketServer::generate_peer_id() {
+    return "peer_" + std::to_string(++m_peer_counter);
+}
+
 void WebSocketServer::on_open(connection_hdl hdl) {
     std::lock_guard<std::mutex> lock(m_mutex);
-    std::cout << "Client connected" << std::endl;
+    std::string peer_id = generate_peer_id();
+    m_peer_ids[hdl] = peer_id;
+    std::cout << "Client connected: " << peer_id << std::endl;
 }
 
 void WebSocketServer::on_close(connection_hdl hdl) {
     std::lock_guard<std::mutex> lock(m_mutex);
+
+    std::string peer_id = m_peer_ids.count(hdl) ? m_peer_ids[hdl] : "unknown";
     auto it = m_peer_rooms.find(hdl);
     if (it != m_peer_rooms.end()) {
         std::string room_id = it->second;
@@ -32,13 +40,14 @@ void WebSocketServer::on_close(connection_hdl hdl) {
             if (room_it->second.peers.empty()) {
                 m_rooms.erase(room_it);
             } else {
-                json notify = {{"type", "peer_left"}, {"room_id", room_id}};
+                json notify = {{"type", "peer_left"}, {"room_id", room_id}, {"peer_id", peer_id}};
                 broadcast_to_room(room_id, notify);
             }
         }
         m_peer_rooms.erase(it);
     }
-    std::cout << "Client disconnected" << std::endl;
+    m_peer_ids.erase(hdl);
+    std::cout << "Client disconnected: " << peer_id << std::endl;
 }
 
 void WebSocketServer::on_message(connection_hdl hdl, server::message_ptr msg) {
@@ -79,6 +88,7 @@ std::string generate_room_id() {
 void WebSocketServer::handle_create_room(connection_hdl hdl, const json& msg) {
     std::lock_guard<std::mutex> lock(m_mutex);
     std::string room_id = generate_room_id();
+    std::string peer_id = m_peer_ids.count(hdl) ? m_peer_ids[hdl] : "unknown";
 
     Room room;
     room.id = room_id;
@@ -91,18 +101,38 @@ void WebSocketServer::handle_create_room(connection_hdl hdl, const json& msg) {
         {"room_id", room_id}
     };
     send_json(hdl, response);
-    std::cout << "Room created: " << room_id << std::endl;
+    std::cout << "Room created: " << room_id << " by " << peer_id << std::endl;
 }
 
 void WebSocketServer::handle_join_room(connection_hdl hdl, const json& msg) {
     std::lock_guard<std::mutex> lock(m_mutex);
     std::string room_id = msg["room_id"];
+    std::string peer_id = m_peer_ids.count(hdl) ? m_peer_ids[hdl] : "unknown";
 
     auto it = m_rooms.find(room_id);
     if (it == m_rooms.end()) {
         json error = {{"type", "error"}, {"message", "Room not found"}};
         send_json(hdl, error);
         return;
+    }
+
+    // 先通知已在房间的人：有新 peer 加入
+    json notify = {
+        {"type", "peer_joined"},
+        {"room_id", room_id},
+        {"peer_id", peer_id}
+    };
+    broadcast_to_room(room_id, notify);
+
+    // 把已在房间的 peer 列表发给新加入者
+    for (auto& existing_peer : it->second.peers) {
+        std::string existing_id = m_peer_ids.count(existing_peer) ? m_peer_ids[existing_peer] : "unknown";
+        json existing_notify = {
+            {"type", "peer_joined"},
+            {"room_id", room_id},
+            {"peer_id", existing_id}
+        };
+        send_json(hdl, existing_notify);
     }
 
     it->second.peers.insert(hdl);
@@ -114,13 +144,7 @@ void WebSocketServer::handle_join_room(connection_hdl hdl, const json& msg) {
         {"peer_count", static_cast<int>(it->second.peers.size())}
     };
     send_json(hdl, response);
-
-    json notify = {
-        {"type", "peer_joined"},
-        {"room_id", room_id}
-    };
-    broadcast_to_room(room_id, notify, hdl);
-    std::cout << "Peer joined room: " << room_id << std::endl;
+    std::cout << peer_id << " joined room: " << room_id << std::endl;
 }
 
 void WebSocketServer::handle_leave_room(connection_hdl hdl, const json& msg) {
@@ -129,13 +153,15 @@ void WebSocketServer::handle_leave_room(connection_hdl hdl, const json& msg) {
     if (it == m_peer_rooms.end()) return;
 
     std::string room_id = it->second;
+    std::string peer_id = m_peer_ids.count(hdl) ? m_peer_ids[hdl] : "unknown";
+
     auto room_it = m_rooms.find(room_id);
     if (room_it != m_rooms.end()) {
         room_it->second.peers.erase(hdl);
         if (room_it->second.peers.empty()) {
             m_rooms.erase(room_it);
         } else {
-            json notify = {{"type", "peer_left"}, {"room_id", room_id}};
+            json notify = {{"type", "peer_left"}, {"room_id", room_id}, {"peer_id", peer_id}};
             broadcast_to_room(room_id, notify);
         }
     }
@@ -145,10 +171,13 @@ void WebSocketServer::handle_leave_room(connection_hdl hdl, const json& msg) {
 void WebSocketServer::handle_offer(connection_hdl hdl, const json& msg) {
     std::lock_guard<std::mutex> lock(m_mutex);
     std::string room_id = msg["room_id"];
+    std::string peer_id = m_peer_ids.count(hdl) ? m_peer_ids[hdl] : "unknown";
+
     json offer_msg = {
         {"type", "offer"},
         {"sdp", msg["sdp"]},
-        {"room_id", room_id}
+        {"room_id", room_id},
+        {"peer_id", peer_id}
     };
     broadcast_to_room(room_id, offer_msg, hdl);
 }
@@ -156,10 +185,13 @@ void WebSocketServer::handle_offer(connection_hdl hdl, const json& msg) {
 void WebSocketServer::handle_answer(connection_hdl hdl, const json& msg) {
     std::lock_guard<std::mutex> lock(m_mutex);
     std::string room_id = msg["room_id"];
+    std::string peer_id = m_peer_ids.count(hdl) ? m_peer_ids[hdl] : "unknown";
+
     json answer_msg = {
         {"type", "answer"},
         {"sdp", msg["sdp"]},
-        {"room_id", room_id}
+        {"room_id", room_id},
+        {"peer_id", peer_id}
     };
     broadcast_to_room(room_id, answer_msg, hdl);
 }
@@ -167,12 +199,15 @@ void WebSocketServer::handle_answer(connection_hdl hdl, const json& msg) {
 void WebSocketServer::handle_ice_candidate(connection_hdl hdl, const json& msg) {
     std::lock_guard<std::mutex> lock(m_mutex);
     std::string room_id = msg["room_id"];
+    std::string peer_id = m_peer_ids.count(hdl) ? m_peer_ids[hdl] : "unknown";
+
     json ice_msg = {
         {"type", "ice_candidate"},
         {"candidate", msg["candidate"]},
         {"sdpMid", msg["sdpMid"]},
         {"sdpMLineIndex", msg["sdpMLineIndex"]},
-        {"room_id", room_id}
+        {"room_id", room_id},
+        {"peer_id", peer_id}
     };
     broadcast_to_room(room_id, ice_msg, hdl);
 }
