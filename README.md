@@ -101,7 +101,7 @@ make -j$(nproc)
 ```
 ws://192.168.1.100:8080
 ```
-
+<img width="1197" height="775" alt="e24d3e9f3531a299d44eace97d5c762b" src="https://github.com/user-attachments/assets/6f1bb472-92ee-4d1a-9678-bcb689e0df34" />
 ## 信令协议
 
 客户端与服务器之间通过 JSON 消息交互：
