@@ -51,7 +51,7 @@ private:
     static void on_ice_candidate(GstElement* webrtcbin, guint mlineindex, gchar* candidate, gpointer user_data);
     static void on_offer_created(GstPromise* promise, gpointer user_data);
     static void on_answer_created(GstPromise* promise, gpointer user_data);
-    static void on_media_stream(GstElement* webrtcbin, GstPad* pad, GstElement* media);
+    static void on_media_stream(GstElement* webrtcbin, GstPad* pad, gpointer user_data);
 
     QWebSocket* m_webSocket;
     GstElement* m_pipeline;

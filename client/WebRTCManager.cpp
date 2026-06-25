@@ -67,13 +67,14 @@ void WebRTCManager::onTextMessageReceived(const QString& message) {
 void WebRTCManager::setupPipeline() {
     GError* error = nullptr;
 
-    // Create pipeline with webrtcbin
-    // Using videotestsrc for simplicity - replace with v4l2src for real camera
+    // Pipeline: 本机摄像头采集 → H264编码 → WebRTC发送
+    // 远端视频流通过 pad-added 回调动态接入
     const char* pipeline_str =
-        "videotestsrc is-live=true ! videoconvert ! x264enc tune=zerolatency bitrate=500 speed-preset=ultrafast ! "
-        "rtph264pay config-interval=1 pt=96 ! webrtcbin name=sendrecv "
-        "stun-server=stun://0.0.0.0:0 "
-        "videotestsrc is-live=true pattern=18 ! videoconvert ! autovideosink";
+        "v4l2src ! video/x-raw,width=640,height=480,framerate=30/1 ! "
+        "videoconvert ! x264enc tune=zerolatency bitrate=800 speed-preset=ultrafast key-int-max=30 ! "
+        "rtph264pay config-interval=1 pt=96 ! "
+        "application/x-rtp,media=video,encoding-name=H264,payload=96 ! "
+        "webrtcbin name=sendrecv stun-server=stun://0.0.0.0:0";
 
     m_pipeline = gst_parse_launch(pipeline_str, &error);
     if (error) {
@@ -88,12 +89,12 @@ void WebRTCManager::setupPipeline() {
         return;
     }
 
-    // Connect signals
+    // 连接 WebRTC 信号
     g_signal_connect(m_webrtcbin, "on-negotiation-needed", G_CALLBACK(on_negotiation_needed), this);
     g_signal_connect(m_webrtcbin, "on-ice-candidate", G_CALLBACK(on_ice_candidate), this);
     g_signal_connect(m_webrtcbin, "pad-added", G_CALLBACK(on_media_stream), this);
 
-    // Start pipeline
+    // 启动 pipeline
     gst_element_set_state(m_pipeline, GST_STATE_PLAYING);
 }
 
@@ -163,16 +164,39 @@ void WebRTCManager::on_answer_created(GstPromise* promise, gpointer user_data) {
     }
 }
 
-void WebRTCManager::on_media_stream(GstElement* webrtcbin, GstPad* pad, GstElement* media) {
-    // Handle incoming media stream
-    GstPad* sink_pad = gst_element_get_static_pad(media, "sink");
-    if (!gst_pad_is_linked(sink_pad)) {
-        GstPadLinkReturn ret = gst_pad_link(pad, sink_pad);
-        if (GST_PAD_LINK_FAILED(ret)) {
-            std::cerr << "Failed to link media pad" << std::endl;
+void WebRTCManager::on_media_stream(GstElement* webrtcbin, GstPad* pad, gpointer user_data) {
+    WebRTCManager* self = static_cast<WebRTCManager*>(user_data);
+
+    // 远端视频流到达时，动态创建解码+显示管线
+    GstCaps* caps = gst_pad_get_current_caps(pad);
+    if (!caps) caps = gst_pad_query_caps(pad, nullptr);
+
+    const GstStructure* s = gst_caps_get_structure(caps, 0);
+    const gchar* name = gst_structure_get_name(s);
+
+    if (g_str_has_prefix(name, "application/x-rtp")) {
+        GstElement* queue = gst_element_factory_make("queue", nullptr);
+        GstElement* depay = gst_element_factory_make("rtph264depay", nullptr);
+        GstElement* dec = gst_element_factory_make("avdec_h264", nullptr);
+        GstElement* conv = gst_element_factory_make("videoconvert", nullptr);
+        GstElement* sink = gst_element_factory_make("autovideosink", nullptr);
+
+        gst_bin_add_many(GST_BIN(self->m_pipeline), queue, depay, dec, conv, sink, nullptr);
+        gst_element_sync_state_with_parent(queue);
+        gst_element_sync_state_with_parent(depay);
+        gst_element_sync_state_with_parent(dec);
+        gst_element_sync_state_with_parent(conv);
+        gst_element_sync_state_with_parent(sink);
+
+        gst_element_link_many(queue, depay, dec, conv, sink, nullptr);
+
+        GstPad* sink_pad = gst_element_get_static_pad(queue, "sink");
+        if (gst_pad_link(pad, sink_pad) != GST_PAD_LINK_OK) {
+            std::cerr << "Failed to link remote video pad" << std::endl;
         }
+        gst_object_unref(sink_pad);
     }
-    gst_object_unref(sink_pad);
+    gst_caps_unref(caps);
 }
 
 void WebRTCManager::sendOffer() {
